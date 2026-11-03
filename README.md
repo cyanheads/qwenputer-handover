@@ -18,46 +18,50 @@
 
 ## Results
 
-### Stock model
+### Stock vs fine-tuned
 
-Base Qwen3.5-4B with the reference machine as its tool, greedy with thinking off, with a budget of 4,096 tokens of Qwen's own writing per problem and n = 100 per row. Each set runs under two prompts, with the calc tool offered both times: upstream's "use calc for every step" system message (`nudge`), and no system message (`bare`).
+Both models answer the same 100 problems per set with upstream's reference machine as their tool, greedy with thinking off, with a budget of 4,096 tokens of Qwen's own writing per problem. Each set runs under two prompts, with the calc tool offered both times: upstream's "use calc for every step" system message (`nudge`), and no system message (`bare`). Each cell reads stock → fine-tuned.
 
-| Set | Prompt | Exact | Hand-over | From machine | Budget hit | Calls per rollout | Calls repeated |
-|:---|:---|---:|---:|---:|---:|---:|---:|
-| `arith` | bare | 98% | 98% | 96% | 2% | 1.56 | 36.5% |
-| `arith` | nudge | 93% | 100% | 93% | 7% | 4.37 | 76.9% |
-| `dmx_div_big` | bare | 79% | 95% | 75% | 21% | 1.50 | 30.0% |
-| `dmx_div_big` | nudge | 87% | 100% | 87% | 16% | 1.95 | 33.8% |
-| `dmx_mul_div_multiple_longer` | bare | 96% | 64% | 47% | 1% | 1.62 | 0.0% |
-| `dmx_mul_div_multiple_longer` | nudge | 95% | 100% | 96% | 5% | 5.14 | 1.9% |
-| `gsm8k` | bare | 95% | 20% | 18% | 1% | 0.30 | 0.0% |
-| `gsm8k` | nudge | 93% | 96% | 89% | 4% | 4.20 | 42.1% |
-| `gsmhard` | bare | 49% | 47% | 39% | 23% | 0.73 | 1.4% |
-| `gsmhard` | nudge | 48% | 98% | 80% | 22% | 3.22 | 36.6% |
+| Set | Prompt | Exact | Hand-over | From machine | Budget hit | Calls per rollout | Calls repeated | Qwen tokens | Exact flips (lost / gained) |
+|:---|:---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `arith` | bare | 98% → 100% | 98% → 100% | 96% → 100% | 2% → 0% | 1.56 → 1.01 | 37% → 1% | 322 → 123 | 0 / 2 |
+| `arith` | nudge | 93% → 100% | 100% → 100% | 93% → 100% | 7% → 0% | 4.37 → 1.01 | 77% → 1% | 430 → 123 | 0 / 7 |
+| `dmx_div_big` | bare | 79% → 98% | 95% → 100% | 75% → 98% | 21% → 2% | 1.50 → 1.35 | 30% → 4% | 1114 → 280 | 0 / 19 |
+| `dmx_div_big` | nudge | 87% → 98% | 100% → 100% | 87% → 98% | 16% → 4% | 1.95 → 1.22 | 34% → 5% | 784 → 348 | 0 / 11 |
+| `dmx_mul_div_multiple_longer` | bare | 96% → 98% | 64% → 97% | 47% → 96% | 1% → 1% | 1.62 → 4.28 | 0% → 1% | 1433 → 1168 | 2 / 4 |
+| `dmx_mul_div_multiple_longer` | nudge | 95% → 98% | 100% → 97% | 96% → 97% | 5% → 0% | 5.14 → 4.16 | 2% → 0% | 1260 → 1057 | 1 / 4 |
+| `gsm8k` | bare | 95% → 94% | 20% → 99% | 18% → 98% | 1% → 0% | 0.30 → 1.71 | 0% → 1% | 384 → 380 | 2 / 1 |
+| `gsm8k` | nudge | 93% → 95% | 96% → 99% | 89% → 96% | 4% → 1% | 4.20 → 1.76 | 42% → 3% | 546 → 408 | 0 / 2 |
+| `gsmhard` | bare | 49% → 51% | 47% → 95% | 39% → 78% | 23% → 18% | 0.73 → 1.79 | 1% → 2% | 1426 → 1267 | 4 / 6 |
+| `gsmhard` | nudge | 48% → 52% | 98% → 97% | 80% → 76% | 22% → 20% | 3.22 → 2.56 | 37% → 31% | 1441 → 1409 | 3 / 7 |
 
-Hand-over means at least one calc call. From machine means the final answer is a value the machine printed. Calls repeated is the share of calls that re-send an expression the machine already answered.
+Hand-over means at least one calc call. From machine means the final answer is a value the machine printed. Calls repeated is the share of calls that re-send an expression the machine already answered. Qwen tokens is the mean Qwen wrote per problem, tool responses excluded. Exact flips count the problems the stock model got right and the fine-tune got wrong, then the reverse.
 
-- **Unprompted hand-over is uneven.** With no system message, Qwen calls the machine on 95–98% of `arith` and `dmx_div_big` problems, 64% of `dmx_mul_div_multiple_longer` and 20% of `gsm8k`.
-- **Runs out of budget on long problems.** 16–21% of `dmx_div_big` runs and 22–23% of `gsmhard` runs hit the 4,096-token budget under either prompt.
-- **The nudge brings re-check loops.** Under it, 77% of `arith` calls repeat an earlier call (37% on `gsmhard`, 42% on `gsm8k`), and `arith` exactness is 5 points below the bare prompt.
+- **More exact answers.** Across the 500 problems per prompt, exact answers went from 417 to 441 under the bare prompt (32 gained, 8 lost; two-sided sign test p = 0.0002) and from 416 to 443 under the nudge (31 gained, 4 lost; p = 4e-6).
+- **Long division finishes.** On `dmx_div_big` without a system message, budget hits fell from 21% to 2% and exactness rose from 79% to 98%, with 19 problems gained and none lost. Qwen writes 280 tokens per problem instead of 1,114.
+- **Hand-over without being asked.** With no system message, the fine-tune calls the machine on 95–100% of every set; the stock model did on 20% of `gsm8k`, 47% of `gsmhard` and 64% of `dmx_mul_div_multiple_longer`.
+- **Re-check loops are gone on arithmetic.** Under the nudge, `arith` went from 4.37 calls per rollout, 77% of them repeats, to 1.01 calls with 1% repeated. `gsmhard` under the nudge still repeats 31% of its calls.
+- **Word problems stay limited by reasoning.** Exactness on `gsm8k` and `gsmhard` moved within noise (`gsmhard` 49% → 51% bare, 48% → 52% nudge; p ≥ 0.34), and 18–20% of `gsmhard` runs still hit the budget.
 
-### Fine-tuned
+### Training
 
-The fine-tune is training now with the recipe under [Running](#running). Its scores on the same 1,000 problems go here when its evals finish.
+12,000 sampled rollouts (temperature 0.7, top-p 0.8, top-k 20, budget 2,048) on 1,500 `synth` and 1,500 `gsm8k_train` problems, 2 samples per problem under each prompt, with re-check loops cut at their first repeat (1,198 cut). Selection kept 5,109 rollouts over 2,715 problems, up to 2 per problem, shortest first. Each is trained under both prompts: 10,218 examples, 3.04M labeled tokens, 2 epochs of 1,278 steps (LoRA rank 16, α 32, lr 1e-4), 82 minutes on one GPU. No evaluation question appears among the 3,000 training questions.
 
-Training data: 12,000 sampled rollouts (temperature 0.7, top-p 0.8, top-k 20, budget 2,048) on 1,500 `synth` and 1,500 `gsm8k_train` problems, 2 samples per problem under each prompt, with re-check loops cut at their first repeat (1,198 cut). Selection kept 5,109 rollouts over 2,715 problems, up to 2 per problem, shortest first. Each is trained under both prompts: 10,218 examples, 3.04M labeled tokens, 2 epochs of 1,278 steps (LoRA rank 16, α 32, lr 1e-4).
+The whole run (setup, a smoke test, both eval scans, the training rollouts, training, the merge and its checks) fit in one Colab G4 session of 2.6 hours, about 26 Colab compute units.
 
-### Merging a fine-tuned base
+### The merged model
 
-Before the full run, a small adapter (1 epoch on 72 rollouts) went through the whole path: export, upstream's merge, and its checks on the merged model.
+The fine-tuned checkpoint goes through upstream's merge, then upstream's own checks. `eval-rv1` runs the merged model on its own, under the nudge, and checks the circuit against the reference machine at every step.
 
 | Check | Result |
 |:---|:---|
-| `textcheck`: KL(base ‖ merged) on upstream's 16 prompts | 5.40e-4, noise floor 5.35e-4 (upstream's stock merge: 6.1e-4 vs 5.1e-4) |
-| `eval-rv1` on `arith`, n = 8: the merged model answering on its own, checked against the reference machine at every step | 8/8 exact, no lockstep errors |
-| `replay` of those 8 records | 0 wrong predictions over 19,705 circuit-written positions |
+| `textcheck`: KL(base ‖ merged) on upstream's 16 prompts | 5.38e-4, noise floor 4.65e-4 (upstream's stock merge: 6.1e-4 vs 5.1e-4); greedy output identical on 11 of 16 |
+| `eval-rv1`, `arith`, n = 40 | 40/40 exact (stock model with the reference machine, nudge, same 40: 36/40) |
+| `eval-rv1`, `dmx_div_big`, the first 40 problems of the table above | 38/40 exact (stock: 34/40) |
+| Lockstep over those 80 conversations | no lock errors, no head mismatches |
+| `replay` of the 80 records | 80/80 ok: 0 wrong predictions and 0 ownership mismatches over 299,661 circuit-written positions |
 
-The full adapter gets the same checks.
+On both sets the merged model scores what the fine-tuned base scored with the reference machine, and misses the same two `dmx_div_big` problems: merging cost no answers.
 
 ## Commands
 
@@ -75,10 +79,11 @@ The full adapter gets the same checks.
 | Step | Needs | Measured on Colab's G4 (RTX PRO 6000, 96 GB) |
 |:---|:---|:---|
 | `make check` | CPU only; no model | |
-| `scan` | A CUDA GPU | Training scan (batch 192, budget 2,048, `--stop-at-repeat`): 273 rollouts/min, 56 GB. Eval scan (batch 64, budget 4,096) while sharing the GPU: 52 rollouts/min |
-| `train` | A CUDA GPU | 3.7–3.9K tokens/s at 32K-token micro-batches, peak 26–29 GB |
+| `scan` | A CUDA GPU | Training scan (batch 192, budget 2,048, `--stop-at-repeat`): 273 rollouts/min, 56 GB. Eval scan (batch 64, budget 4,096) while sharing the GPU: 52 rollouts/min on the stock model, 135 on the fine-tune, whose answers are shorter |
+| `train` | A CUDA GPU | 3.7–3.9K tokens/s at 32K-token micro-batches, peak 26–29 GB; the run above took 82 minutes |
 | `export`, `make merge` | ~31 GB RAM, ~30 GB disk; CUDA for the merge's anti-sink fit | Merged checkpoint: 18 GB |
-| `make textcheck`, `make eval-rv1` | CUDA, ≥ 24 GB (the merged model is ~19 GB bf16) | `eval-rv1` with `BATCH=8`: 8 problems in 83 s |
+| `make textcheck`, `make eval-rv1` | CUDA, ≥ 24 GB (the merged model is ~19 GB bf16) | `eval-rv1` on the fine-tune with `BATCH=8`: 40 `arith` problems in 55 s, 40 `dmx_div_big` in 179 s |
+| `make replay` | CPU, one core per process | 40 `arith` records in 7 minutes; the 40 longer `dmx_div_big` records in 100 s split across 8 processes |
 
 `scan` and `train` refuse to start without CUDA. Under Windows display drivers (WSL included), a job that outgrows the card spills into shared system memory and slows to a crawl instead of failing with OOM, so check the first batch's memory there.
 
@@ -116,7 +121,12 @@ uv run handover scan --model runs/ft-base --data arith,gsmhard,dmx_div_big,dmx_m
 make merge SRC=runs/ft-base MERGED=runs/ft-rv1
 make textcheck SRC=runs/ft-base MERGED=runs/ft-rv1 OUT=runs/checks
 make eval-rv1 MERGED=runs/ft-rv1 DATA=arith N=40 BATCH=8 OUT=runs/eval-rv1
+# DeepMind sets are not nested by n: name the first 40 of the 100 scanned above
+IDS=$(uv run python -c "from qwenputer_handover.problems.sources import load; print(','.join(p.id for p in load('dmx_div_big', 100, 0)[:40]))")
+uv run python -m chipformer.rv.evalarith runs/ft-rv1 --cond rv1 --data dmx_div_big --n 100 --ids "$IDS" \
+  --batch 8 --firmware firmware/calc-bridge.elf --out runs/eval-rv1
 make replay MERGED=runs/ft-rv1 DATA=arith OUT=runs/eval-rv1
+make replay MERGED=runs/ft-rv1 DATA=dmx_div_big OUT=runs/eval-rv1
 ```
 
 ## Design decisions
