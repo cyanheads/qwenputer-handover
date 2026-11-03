@@ -31,7 +31,7 @@ def _scan(a: argparse.Namespace) -> None:
         problems,
         parse_variants(a.variants),
         a.samples,
-        Decoding(a.temperature, a.top_p, a.top_k, a.budget),
+        Decoding(a.temperature, a.top_p, a.top_k, a.budget, a.stop_at_repeat),
         a.out,
         a.batch,
         a.seed,
@@ -68,6 +68,7 @@ def _train(a: argparse.Namespace) -> None:
         epochs=a.epochs,
         grad_accum=a.grad_accum,
         max_len=a.max_len,
+        batch_tokens=a.batch_tokens,
         seed=a.seed,
     )
     train(resolve_model(a.model), list(read(a.sft)), a.variant, a.out, cfg)
@@ -103,6 +104,12 @@ def main() -> None:
     s.add_argument("--top-p", type=float, default=0.8)
     s.add_argument("--top-k", type=int, default=20)
     s.add_argument("--budget", type=int, default=4096, help="Qwen-written tokens per rollout")
+    s.add_argument(
+        "--stop-at-repeat",
+        action="store_true",
+        help="end a rollout at its first calc call repeating an earlier expression (selection "
+        "rejects it anyway): saves decode on training scans, skews an eval scan's metrics",
+    )
     s.add_argument("--batch", type=int, default=16, help="rollouts decoded together")
     s.add_argument("--firmware", type=Path, default=FIRMWARE)
     s.add_argument("--out", type=Path, required=True, help="directory of <set>.<variant>.jsonl")
@@ -134,6 +141,7 @@ def main() -> None:
     t.add_argument("--epochs", type=int, default=2)
     t.add_argument("--grad-accum", type=int, default=16)
     t.add_argument("--max-len", type=int, default=4096)
+    t.add_argument("--batch-tokens", type=int, default=16384, help="padded tokens per forward pass")
     t.add_argument("--seed", type=int, default=0)
     t.set_defaults(run=_train)
 

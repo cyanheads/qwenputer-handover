@@ -8,6 +8,7 @@ Every figure is a direct count over stored rollouts, grouped by (dataset, varian
 | handover | at least one calc call |
 | from_machine | the final answer is a value the machine printed |
 | budget | stopped at the Qwen-token budget (ran out instead of answering) |
+| cut | ended at a repeated calc call (only scans run with ``--stop-at-repeat``) |
 | calls | mean calc calls per rollout |
 | err_calls | share of calls answered with an error |
 | repeat_calls | share of calls repeating an expression already sent (re-verification) |
@@ -59,6 +60,7 @@ class Summary:
     handover: float
     from_machine: float
     budget: float
+    cut: float
     calls: float
     err_calls: float
     repeat_calls: float
@@ -83,6 +85,7 @@ def summarize(rollouts: Iterable[Rollout]) -> list[Summary]:
                 handover=sum(bool(r.calls) for r in rs) / n,
                 from_machine=sum(from_machine(r) for r in rs) / n,
                 budget=sum(r.stop == "budget" for r in rs) / n,
+                cut=sum(r.stop == "repeat" for r in rs) / n,
                 calls=n_calls / n,
                 err_calls=sum(map(error_calls, rs)) / n_calls if n_calls else 0.0,
                 repeat_calls=sum(map(repeat_calls, rs)) / n_calls if n_calls else 0.0,
@@ -96,13 +99,14 @@ def summarize(rollouts: Iterable[Rollout]) -> list[Summary]:
 def table(rows: list[Summary]) -> str:
     head = (
         "| dataset | variant | rollouts | problems | exact | handover | from_machine | budget "
-        "| calls | err_calls | repeat_calls | qwen_tok | solved |"
+        "| cut | calls | err_calls | repeat_calls | qwen_tok | solved |"
     )
-    lines = [head, "|:---|:---|" + "---:|" * 11]
+    lines = [head, "|:---|:---|" + "---:|" * 12]
     for s in rows:
         lines.append(
             f"| {s.dataset} | {s.variant} | {s.rollouts} | {s.problems} | {s.exact:.1%} "
-            f"| {s.handover:.1%} | {s.from_machine:.1%} | {s.budget:.1%} | {s.calls:.2f} "
+            f"| {s.handover:.1%} | {s.from_machine:.1%} | {s.budget:.1%} | {s.cut:.1%} "
+            f"| {s.calls:.2f} "
             f"| {s.err_calls:.1%} | {s.repeat_calls:.1%} | {s.qwen_tok:.0f} "
             f"| {s.solved}/{s.problems} |"
         )

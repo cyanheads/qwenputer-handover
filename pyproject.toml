@@ -37,6 +37,11 @@ Upstream = "https://github.com/divagr18/qwenputer"
 [project.scripts]
 handover = "qwenputer_handover.cli:main"
 
+[project.optional-dependencies]
+fla = [
+    "flash-linear-attention>=0.4 ; sys_platform == 'linux'",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.13",

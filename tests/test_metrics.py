@@ -52,3 +52,8 @@ def test_summarize_groups_by_dataset_and_variant() -> None:
     assert nudge.calls == 0.5
     assert nudge.qwen_tok == pytest.approx(6.0)
     assert [s.variant for s in rows] == ["bare", "nudge"]
+
+
+def test_cut_counts_rollouts_ended_at_a_repeated_call() -> None:
+    [row] = summarize([rollout(stop="repeat", exact=False), rollout(sample=1)])
+    assert (row.cut, row.budget, row.exact) == (0.5, 0.0, 0.5)

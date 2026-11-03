@@ -43,10 +43,10 @@ Not done: training on real data, the check that a fine-tuned base still merges c
 
 | Command | What it does |
 |:---|:---|
-| `handover scan` | Samples base Qwen3.5 on a problem set; the reference machine answers each calc call, forced token by token. Writes `<set>.<variant>.jsonl` and resumes from what is already on disk |
-| `handover metrics` | Prints exactness, hand-over rate, answers taken from the machine, budget hits, error and repeated calls, per set and variant |
+| `handover scan` | Samples base Qwen3.5 on a problem set; the reference machine answers each calc call, forced token by token. Writes `<set>.<variant>.jsonl` and resumes from what is already on disk. `--stop-at-repeat` ends a training rollout at its first repeated call |
+| `handover metrics` | Prints exactness, hand-over rate, answers taken from the machine, budget hits, repeat cuts, error and repeated calls, per set and variant |
 | `handover select` | Rejection-samples train rollouts into an SFT set |
-| `handover train` | LoRA SFT on an SFT set; the loss covers only the tokens Qwen wrote |
+| `handover train` | LoRA SFT on an SFT set in length-grouped, padded micro-batches; the loss covers only the tokens Qwen wrote |
 | `handover export` | Folds an adapter into a copy of the base checkpoint (same keys, shards, index) |
 | `make merge` · `textcheck` · `eval-rv1` · `eval-pytool` · `replay` | Upstream's merge, text-fidelity check, evals and IR replay on an exported checkpoint |
 
@@ -61,7 +61,7 @@ Not done: training on real data, the check that a fine-tuned base still merges c
 
 The plumbing check, at a 512-token budget, peaked at 14.2 GB on a 16 GB RTX 4070 Ti SUPER. The headroom scan ran at batch 64 on a 96 GB RTX PRO 6000 (Colab's G4), where one decoder at the full 4,096-token budget takes about 35 GB. Under Windows display drivers (WSL included), a job that outgrows the card spills into shared system memory and slows to a crawl instead of failing with OOM, so check the first batch's memory there.
 
-Linux installs take PyTorch's CUDA 13.0 wheel (see `pyproject.toml`). Gated DeltaNet prefill runs faster with [flash-linear-attention](https://github.com/fla-org/flash-linear-attention): `uv pip install flash-linear-attention`, then use `uv run --no-sync`, since a plain `uv run` syncs the environment and removes it.
+Linux installs take PyTorch's CUDA 13.0 wheel (see `pyproject.toml`). On Linux, `uv sync --extra fla` adds [flash-linear-attention](https://github.com/fla-org/flash-linear-attention), whose Triton kernels replace transformers' torch fallback for the Gated DeltaNet layers; training needs it to run at a usable speed.
 
 ## Getting started
 
@@ -84,8 +84,8 @@ The recipe the pipeline was built for. Step 0 produced the table above; steps 1 
 uv run handover scan --data arith,gsmhard,dmx_div_big,dmx_mul_div_multiple_longer --n 100 --batch 64 --out runs/headroom
 uv run handover metrics runs/headroom/*.jsonl
 
-# 1. training rollouts: sampled, both prompts, 4 per problem
-uv run handover scan --data synth,gsm8k_train --n 2000 --samples 4 --temperature 0.7 --out runs/train
+# 1. training rollouts: sampled, both prompts, 4 per problem, loops cut at their first repeat
+uv run handover scan --data synth,gsm8k_train --n 2000 --samples 4 --temperature 0.7 --stop-at-repeat --out runs/train
 uv run handover select runs/train/*.jsonl --out runs/sft.jsonl
 uv run handover train --sft runs/sft.jsonl --out runs/adapter
 
@@ -103,6 +103,8 @@ make replay MERGED=runs/ft-rv1 DATA=dmx_div_big OUT=runs/eval
 - **Sample with the nudge, train without it.** Rollouts sampled under the nudge are trained under the `bare` prompt (context distillation). The goal is a model that hands arithmetic over unprompted.
 - **Loss on Qwen's tokens only.** The tool response the circuit prints is masked: the merged model never predicts those positions with Qwen's head.
 - **Rejection criteria.** A rollout is kept when its answer is exact, is a value the machine printed, it ended on its own, and it never repeated a call. A refused call followed by a successful split is kept, since that recovery is worth learning. Re-verification loops are not.
+- **Cut loops early in training scans.** A rollout that repeats a call can never be selected, and re-check loops are what runs most rollouts to the budget. `--stop-at-repeat` ends it at the repeated `</tool_call>`, before the machine runs, so training scans spend no decode on rollouts `select` would drop. Eval scans run without it: their metrics count the loops.
+- **Batched, exact training.** Each optimizer step takes examples of similar length, run as right-padded micro-batches under a padded-token budget. Right padding is exact for a causal model (Gated DeltaNet also zeroes padded inputs), and a test checks the batched loss and gradients against the one-sequence path. The 248K-vocabulary head runs only at labeled positions, in checkpointed chunks.
 - **Train and eval never mix.** Every problem carries its split, and `select` raises on an eval problem.
 - **Adapters on the language model only.** Full attention, Gated DeltaNet and MLP projections get adapters; the vision tower, embeddings and tied head stay frozen. The export changes those weights and nothing else.
 - **Upstream's decoder, sampled inside its CUDA graph.** Rollouts run on upstream's `BatchDecoder` (continuous batching, one CUDA graph per step), with a `Forcer` per rollout in its token hook. For sampled runs, `Sampling` replaces its argmax with a Gumbel-max draw over the top-k / top-p candidates, the noise hashed from each row's seed and position, so no host-side RNG runs inside the graph. It ran about 10× faster than HF `generate`, and greedy results matched it.
@@ -120,7 +122,7 @@ make replay MERGED=runs/ft-rv1 DATA=dmx_div_big OUT=runs/eval
 
 ## Development
 
-- Gate: `make check` (ruff, mypy strict, pytest, changelog drift). Tests use no model weights.
+- Gate: `make check` (ruff, mypy strict, pytest, changelog drift). Tests download nothing; the trainer's build a tiny random Qwen3.5 on the CPU.
 - `chipformer` is pinned to one Qwenputer commit in `pyproject.toml`. When you bump it, re-vendor `firmware/calc-bridge.elf` from the same commit.
 - Agent rules: [CLAUDE.md](./CLAUDE.md).
 

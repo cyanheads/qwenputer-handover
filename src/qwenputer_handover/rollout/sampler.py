@@ -27,7 +27,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase, Qwen3_5ForCondi
 
 from qwenputer_handover.problems.problem import Problem
 from qwenputer_handover.rollout import records
-from qwenputer_handover.rollout.forcing import Forcer
+from qwenputer_handover.rollout.forcing import Forcer, RepeatCut
 from qwenputer_handover.rollout.prompts import prompt_ids
 from qwenputer_handover.rollout.records import Rollout, Stop
 from qwenputer_handover.rollout.sampling import Sampling
@@ -43,6 +43,7 @@ class Decoding:
     top_p: float
     top_k: int
     budget: int  # Qwen-written tokens per rollout
+    stop_at_repeat: bool  # end a rollout at its first repeated calc call (training scans)
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,16 @@ class Sampler:
         if not isinstance(i, int):
             raise KeyError(f"{token} is not a single token of this tokenizer")
         return i
+
+    def decode(self, ids: list[int]) -> str:
+        """Token ids as text, special tokens kept (the form ``records.parse_calls`` reads)."""
+        text = self.tok.decode(ids, skip_special_tokens=False)
+        if not isinstance(text, str):
+            raise TypeError(f"decode returned {type(text).__name__} for one sequence")
+        return text
+
+    def _expression(self, body: list[int]) -> str:
+        return records.call_expression(self.decode(body))
 
     def run(
         self,
@@ -95,12 +106,25 @@ class Sampler:
         def hook(i: int, token: int) -> tuple[int, bool]:
             if i not in forcers:
                 host = BridgeHost(self.text, self.firmware, prompts[i])
-                forcers[i] = Forcer(host, self.eos, decoding.budget)
+                cut = (
+                    RepeatCut(self.text.TCO, self.text.TCC, self._expression)
+                    if decoding.stop_at_repeat
+                    else None
+                )
+                forcers[i] = Forcer(host, self.eos, decoding.budget, cut)
             return forcers[i].step(token)
 
         def done(i: int, gen: list[int]) -> None:
             f = forcers.pop(i)
-            stop: Stop = "budget" if f.budget_hit else "eos" if gen[-1] in self.eos else "length"
+            stop: Stop = (
+                "repeat"
+                if f.repeat_hit
+                else "budget"
+                if f.budget_hit
+                else "eos"
+                if gen[-1] in self.eos
+                else "length"
+            )
             on_done(i, Generation(list(gen), f.forced, stop))
 
         decoder.run(prompts, max_new, on_done=done, hook=hook)
@@ -143,7 +167,7 @@ def scan(
         return
     prompts = [prompt_ids(sampler.tok, p.question, v) for p, v, _ in jobs]
     t0 = time.time()
-    tally = {"rollouts": 0, "exact": 0, "calls": 0, "budget": 0}
+    tally = {"rollouts": 0, "exact": 0, "calls": 0, "budget": 0, "repeat": 0}
 
     def finished(i: int, g: Generation) -> None:
         p, v, s = jobs[i]
@@ -153,6 +177,7 @@ def scan(
         tally["exact"] += r.exact
         tally["calls"] += len(r.calls)
         tally["budget"] += r.stop == "budget"
+        tally["repeat"] += r.stop == "repeat"
         if tally["rollouts"] % batch == 0 or tally["rollouts"] == len(jobs):
             rate = tally["rollouts"] / (time.time() - t0) * 60
             progress = {**tally, "of": len(jobs), "per_min": round(rate, 1)}
@@ -170,9 +195,7 @@ def _rollout(
     prompt: list[int],
     g: Generation,
 ) -> Rollout:
-    text = sampler.tok.decode(g.gen_ids, skip_special_tokens=False)
-    if not isinstance(text, str):
-        raise TypeError(f"decode returned {type(text).__name__} for one sequence")
+    text = sampler.decode(g.gen_ids)
     scored = arith_bench.exact_fields({"gold": p.gold}, text)
     return Rollout(
         problem_id=p.id,

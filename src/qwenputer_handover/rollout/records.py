@@ -17,7 +17,7 @@ from typing import Literal
 from qwenputer_handover.problems.problem import Split
 from qwenputer_handover.rollout.variants import Variant
 
-Stop = Literal["eos", "budget", "length"]
+Stop = Literal["eos", "budget", "length", "repeat"]  # repeat: cut at a repeated calc call
 
 
 @dataclass(frozen=True)
@@ -64,14 +64,19 @@ TOOL_EXCHANGE = re.compile(
 EXPRESSION = re.compile(r"<parameter=expression>\s*(.*?)\s*</parameter>", re.DOTALL)
 
 
+def call_expression(body: str) -> str:
+    """The expression of a calc call, from the text between ``<tool_call>`` and
+    ``</tool_call>``; a body without an expression parameter is its own expression."""
+    m = EXPRESSION.search(body)
+    return (m[1] if m else body).strip()
+
+
 def parse_calls(text: str) -> list[Call]:
-    """Each calc call in a decoded generation with the response that followed it; a call
-    without an expression parameter keeps its raw body as the expression."""
-    calls = []
-    for body, response in TOOL_EXCHANGE.findall(text):
-        m = EXPRESSION.search(body)
-        calls.append(Call(expression=(m[1] if m else body).strip(), response=response.strip()))
-    return calls
+    """Each calc call in a decoded generation with the response that followed it."""
+    return [
+        Call(expression=call_expression(body), response=response.strip())
+        for body, response in TOOL_EXCHANGE.findall(text)
+    ]
 
 
 def forced_spans(flags: Iterable[bool]) -> list[tuple[int, int]]:
