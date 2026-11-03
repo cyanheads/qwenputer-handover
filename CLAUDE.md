@@ -2,7 +2,7 @@
 
 Python (uv) package that teaches Qwen3.5-4B to hand arithmetic to the calculator Qwenputer compiles into its weights. It samples the stock model with upstream's reference machine as the tool (`handover scan`), rejection-samples an SFT set (`select`), trains a LoRA (`train`), and folds it into a base-format checkpoint (`export`) for upstream's `python -m chipformer.rv.merge`.
 
-**Status:** a parked research experiment. A partial headroom scan ran, and no real training run or merge check has. README § Results so far has the numbers and what was never run.
+**Status:** a research experiment with one training run (Colab G4): baseline evals, training rollouts, a LoRA under both prompts, and the merge-after-fine-tune checks. README § Results has the numbers.
 
 **Orientation:** this file is the behavioral layer; `README.md` has the command table, the hardware each step needs, the run recipe and the design decisions.
 

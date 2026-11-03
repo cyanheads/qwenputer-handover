@@ -12,32 +12,52 @@
 ---
 
 > [!NOTE]
-> **A parked research experiment.** This repo is a weekend-scale exploration. It stopped after a partial headroom scan, before any real training run or merge check, so it makes no claim that the fine-tune works or helps. The numbers below come from one seed on samples of at most 100 problems.
+> **A research experiment.** One LoRA run on one seed, evaluated on 100 problems per set. The numbers describe this run, not a benchmark.
 
-[Qwenputer](https://github.com/divagr18/qwenputer) compiles an RV32 CPU running a calc firmware into Qwen3.5-4B's weights: when the model closes a `<tool_call>`, the circuit evaluates the expression and prints the exact answer as ordinary tokens. Upstream lists Qwen not handing the calculation over as its main risk, with a LoRA as the planned fix. This repo is a pipeline for that LoRA. It never trains the merged model. Rollouts and training use the stock checkpoint, with upstream's reference machine standing in for the circuit; that machine's responses are byte-identical to the circuit's. The adapter is then folded back into a base-format checkpoint for upstream's merge.
+[Qwenputer](https://github.com/divagr18/qwenputer) compiles an RV32 CPU running a calc firmware into Qwen3.5-4B's weights: when the model closes a `<tool_call>`, the circuit evaluates the expression and prints the exact answer as ordinary tokens. Upstream lists Qwen not handing the calculation over as its main risk, with a LoRA as the planned fix. This repo builds that LoRA. It never trains the merged model. Rollouts and training use the stock checkpoint, with upstream's reference machine standing in for the circuit; that machine's responses are byte-identical to the circuit's. The adapter is then folded back into a base-format checkpoint for upstream's merge.
 
-## Results so far
+## Results
 
-The headroom scan asks whether a fine-tune has anything to fix. It runs base Qwen3.5-4B with the reference machine as its tool, greedy with thinking off, with a budget of 4,096 tokens of Qwen's own writing per problem. Each set runs twice, with the calc tool offered both times: under upstream's "use calc for every step" system message (`nudge`) and with no system message (`bare`). The scan was stopped partway; the table covers the 596 of 800 planned rollouts written by then:
+### Stock model
 
-| Set | Prompt | n | Exact | Hand-over | From machine | Budget hit | Calls per rollout | Calls repeated |
-|:---|:---|---:|---:|---:|---:|---:|---:|---:|
-| `arith` | bare | 100 | 98.0% | 97.0% | 95.0% | 2.0% | 1.33 | 25.6% |
-| `arith` | nudge | 100 | 92.0% | 100.0% | 92.0% | 8.0% | 4.91 | 79.4% |
-| `dmx_div_big` | bare | 85 | 96.5% | 91.8% | 88.2% | 0.0% | 0.99 | 1.2% |
-| `dmx_div_big` | nudge | 87 | 97.7% | 100.0% | 97.7% | 0.0% | 1.13 | 2.0% |
-| `gsmhard` | bare | 100 | 52.0% | 47.0% | 36.0% | 19.0% | 0.90 | 2.2% |
-| `gsmhard` | nudge | 100 | 48.0% | 96.0% | 74.0% | 26.0% | 2.46 | 12.6% |
-| `dmx_mul_div_multiple_longer` | bare | 11 | 90.9% | 81.8% | 54.5% | 0.0% | 1.64 | 0.0% |
-| `dmx_mul_div_multiple_longer` | nudge | 13 | 100.0% | 100.0% | 100.0% | 0.0% | 3.23 | 0.0% |
+Base Qwen3.5-4B with the reference machine as its tool, greedy with thinking off, with a budget of 4,096 tokens of Qwen's own writing per problem and n = 100 per row. Each set runs under two prompts, with the calc tool offered both times: upstream's "use calc for every step" system message (`nudge`), and no system message (`bare`).
+
+| Set | Prompt | Exact | Hand-over | From machine | Budget hit | Calls per rollout | Calls repeated |
+|:---|:---|---:|---:|---:|---:|---:|---:|
+| `arith` | bare | 98% | 98% | 96% | 2% | 1.56 | 36.5% |
+| `arith` | nudge | 93% | 100% | 93% | 7% | 4.37 | 76.9% |
+| `dmx_div_big` | bare | 79% | 95% | 75% | 21% | 1.50 | 30.0% |
+| `dmx_div_big` | nudge | 87% | 100% | 87% | 16% | 1.95 | 33.8% |
+| `dmx_mul_div_multiple_longer` | bare | 96% | 64% | 47% | 1% | 1.62 | 0.0% |
+| `dmx_mul_div_multiple_longer` | nudge | 95% | 100% | 96% | 5% | 5.14 | 1.9% |
+| `gsm8k` | bare | 95% | 20% | 18% | 1% | 0.30 | 0.0% |
+| `gsm8k` | nudge | 93% | 96% | 89% | 4% | 4.20 | 42.1% |
+| `gsmhard` | bare | 49% | 47% | 39% | 23% | 0.73 | 1.4% |
+| `gsmhard` | nudge | 48% | 98% | 80% | 22% | 3.22 | 36.6% |
 
 Hand-over means at least one calc call. From machine means the final answer is a value the machine printed. Calls repeated is the share of calls that re-send an expression the machine already answered.
 
-- **Hand-over mostly happens already.** With no prompt, Qwen calls the machine on 97% of `arith` and 92% of `dmx_div_big` problems.
-- **The headroom is in two places.** On GSM-Hard word problems Qwen hands over only 47% of the time unprompted, and 19–26% of runs hit the budget under either prompt. Under the nudge, re-check loops take over: 79% of `arith` calls repeat an earlier one, and exactness falls 6 points below the bare prompt.
-- **Sampling shows the same loops.** On 64 generated `synth` problems, 2 samples each at temperature 0.7, 54–63% of calls were repeats, and 21% of bare runs and 13% of nudged runs hit the budget (80.5% and 88.3% exact).
+- **Unprompted hand-over is uneven.** With no system message, Qwen calls the machine on 95–98% of `arith` and `dmx_div_big` problems, 64% of `dmx_mul_div_multiple_longer` and 20% of `gsm8k`.
+- **Runs out of budget on long problems.** 16–21% of `dmx_div_big` runs and 22–23% of `gsmhard` runs hit the 4,096-token budget under either prompt.
+- **The nudge brings re-check loops.** Under it, 77% of `arith` calls repeat an earlier call (37% on `gsmhard`, 42% on `gsm8k`), and `arith` exactness is 5 points below the bare prompt.
 
-Not done: training on real data, the check that a fine-tuned base still merges cleanly, and any comparison with upstream's published evals. `scan → select → train → export` has run end to end only as a plumbing check on 4–8 problems.
+### Fine-tuned
+
+The fine-tune is training now with the recipe under [Running](#running). Its scores on the same 1,000 problems go here when its evals finish.
+
+Training data: 12,000 sampled rollouts (temperature 0.7, top-p 0.8, top-k 20, budget 2,048) on 1,500 `synth` and 1,500 `gsm8k_train` problems, 2 samples per problem under each prompt, with re-check loops cut at their first repeat (1,198 cut). Selection kept 5,109 rollouts over 2,715 problems, up to 2 per problem, shortest first. Each is trained under both prompts: 10,218 examples, 3.04M labeled tokens, 2 epochs of 1,278 steps (LoRA rank 16, α 32, lr 1e-4).
+
+### Merging a fine-tuned base
+
+Before the full run, a small adapter (1 epoch on 72 rollouts) went through the whole path: export, upstream's merge, and its checks on the merged model.
+
+| Check | Result |
+|:---|:---|
+| `textcheck`: KL(base ‖ merged) on upstream's 16 prompts | 5.40e-4, noise floor 5.35e-4 (upstream's stock merge: 6.1e-4 vs 5.1e-4) |
+| `eval-rv1` on `arith`, n = 8: the merged model answering on its own, checked against the reference machine at every step | 8/8 exact, no lockstep errors |
+| `replay` of those 8 records | 0 wrong predictions over 19,705 circuit-written positions |
+
+The full adapter gets the same checks.
 
 ## Commands
 
@@ -52,14 +72,15 @@ Not done: training on real data, the check that a fine-tuned base still merges c
 
 ## Hardware
 
-| Step | Needs |
-|:---|:---|
-| `make check` | CPU only; no model |
-| `scan`, `train` | A CUDA GPU; both refuse to start without one |
-| `export`, `make merge` | ~31 GB RAM, ~30 GB disk; CUDA for the merge's anti-sink fit |
-| `make textcheck`, `make eval-rv1` | CUDA, ≥ 24 GB (the merged model is ~19 GB bf16) |
+| Step | Needs | Measured on Colab's G4 (RTX PRO 6000, 96 GB) |
+|:---|:---|:---|
+| `make check` | CPU only; no model | |
+| `scan` | A CUDA GPU | Training scan (batch 192, budget 2,048, `--stop-at-repeat`): 273 rollouts/min, 56 GB. Eval scan (batch 64, budget 4,096) while sharing the GPU: 52 rollouts/min |
+| `train` | A CUDA GPU | 3.7–3.9K tokens/s at 32K-token micro-batches, peak 26–29 GB |
+| `export`, `make merge` | ~31 GB RAM, ~30 GB disk; CUDA for the merge's anti-sink fit | Merged checkpoint: 18 GB |
+| `make textcheck`, `make eval-rv1` | CUDA, ≥ 24 GB (the merged model is ~19 GB bf16) | `eval-rv1` with `BATCH=8`: 8 problems in 83 s |
 
-The plumbing check, at a 512-token budget, peaked at 14.2 GB on a 16 GB RTX 4070 Ti SUPER. The headroom scan ran at batch 64 on a 96 GB RTX PRO 6000 (Colab's G4), where one decoder at the full 4,096-token budget takes about 35 GB. Under Windows display drivers (WSL included), a job that outgrows the card spills into shared system memory and slows to a crawl instead of failing with OOM, so check the first batch's memory there.
+`scan` and `train` refuse to start without CUDA. Under Windows display drivers (WSL included), a job that outgrows the card spills into shared system memory and slows to a crawl instead of failing with OOM, so check the first batch's memory there.
 
 Linux installs take PyTorch's CUDA 13.0 wheel (see `pyproject.toml`). On Linux, `uv sync --extra fla` adds [flash-linear-attention](https://github.com/fla-org/flash-linear-attention), whose Triton kernels replace transformers' torch fallback for the Gated DeltaNet layers; training needs it to run at a usable speed.
 
@@ -71,35 +92,36 @@ uv sync                      # pulls chipformer from Qwenputer at the pinned com
 make check
 ```
 
-`make check` builds the changelog with [Bun](https://bun.sh); without Bun, run `make lint typecheck test`.
+On a Linux GPU machine, use `uv sync --extra fla` instead. `make check` builds the changelog with [Bun](https://bun.sh); without Bun, run `make lint typecheck test`.
 
 Problem sets: `arith`, `gsm8k`, `gsmhard` (evaluation) and `synth`, `gsm8k_train` (training) need nothing local. Upstream's DeepMind sets (`dmx_*`, `dmi_*`, `dmxc_*`) read `~/data/dm/mathematics_dataset-v1.0/`, unpacked from [mathematics_dataset-v1.0.tar.gz](https://storage.googleapis.com/mathematics-dataset/mathematics_dataset-v1.0.tar.gz). The NUPA sets read `~/data/nupa/test.json`.
 
 ## Running
 
-The recipe the pipeline was built for. Step 0 produced the table above; steps 1 and 2 have only run as the plumbing check.
+The commands behind the results above.
 
 ```bash
-# 0. headroom: greedy, both prompts, upstream's eval sets
-uv run handover scan --data arith,gsmhard,dmx_div_big,dmx_mul_div_multiple_longer --n 100 --batch 64 --out runs/headroom
-uv run handover metrics runs/headroom/*.jsonl
+# 0. baseline: greedy, both prompts, budget 4,096
+uv run handover scan --data arith,gsmhard,dmx_div_big,dmx_mul_div_multiple_longer,gsm8k --n 100 --batch 64 --out runs/eval-base
+uv run handover metrics runs/eval-base/*.jsonl
 
-# 1. training rollouts: sampled, both prompts, 4 per problem, loops cut at their first repeat
-uv run handover scan --data synth,gsm8k_train --n 2000 --samples 4 --temperature 0.7 --stop-at-repeat --out runs/train
-uv run handover select runs/train/*.jsonl --out runs/sft.jsonl
-uv run handover train --sft runs/sft.jsonl --out runs/adapter
+# 1. training rollouts (2 per problem under each prompt, loops cut at their first repeat), selection, LoRA SFT
+uv run handover scan --data synth,gsm8k_train --n 1500 --samples 2 --temperature 0.7 --budget 2048 --stop-at-repeat --batch 192 --seed 1 --out runs/train
+uv run handover select runs/train/*.jsonl --per-problem 2 --out runs/sft.jsonl
+uv run handover train --sft runs/sft.jsonl --variants bare,nudge --batch-tokens 32768 --out runs/adapter
 
-# 2. on a 24 GB+ GPU: export, upstream's merge, its checks
+# 2. the fine-tuned base on the baseline's problems; then upstream's merge and its checks
 uv run handover export --adapter runs/adapter --out runs/ft-base
+uv run handover scan --model runs/ft-base --data arith,gsmhard,dmx_div_big,dmx_mul_div_multiple_longer,gsm8k --n 100 --batch 64 --out runs/eval-ft
 make merge SRC=runs/ft-base MERGED=runs/ft-rv1
 make textcheck SRC=runs/ft-base MERGED=runs/ft-rv1 OUT=runs/checks
-make eval-rv1 MERGED=runs/ft-rv1 DATA=dmx_div_big N=100 OUT=runs/eval
-make replay MERGED=runs/ft-rv1 DATA=dmx_div_big OUT=runs/eval
+make eval-rv1 MERGED=runs/ft-rv1 DATA=arith N=40 BATCH=8 OUT=runs/eval-rv1
+make replay MERGED=runs/ft-rv1 DATA=arith OUT=runs/eval-rv1
 ```
 
 ## Design decisions
 
-- **Train on the base model, merge after.** The circuit is exact and deterministic, and upstream's `BridgeHost` reproduces its output byte for byte. That makes base-model rollouts the merged model's conversations, at base-model speed. The open question is whether a fine-tuned base still merges cleanly. `textcheck` (KL against its own base) and `replay` are meant to answer it before any long training run.
+- **Train on the base model, merge after.** The circuit is exact and deterministic, and upstream's `BridgeHost` reproduces its output byte for byte. That makes base-model rollouts the merged model's conversations, at base-model speed. Whether a fine-tuned base still merges cleanly is checked with upstream's own tools: `textcheck` (KL against its own base), `eval-rv1` (lockstep against the reference machine) and `replay`.
 - **Sample with the nudge, train without it.** Rollouts sampled under the nudge are trained under the `bare` prompt (context distillation). The goal is a model that hands arithmetic over unprompted. `train --variants bare,nudge` also trains each selected rollout under the nudge, which upstream's `eval-rv1` uses and where re-check loops dominate.
 - **Loss on Qwen's tokens only.** The tool response the circuit prints is masked: the merged model never predicts those positions with Qwen's head.
 - **Rejection criteria.** A rollout is kept when its answer is exact, is a value the machine printed, it ended on its own, and it never repeated a call. A refused call followed by a successful split is kept, since that recovery is worth learning. Re-verification loops are not.
@@ -114,7 +136,7 @@ make replay MERGED=runs/ft-rv1 DATA=dmx_div_big OUT=runs/eval
 | Path | Purpose |
 |:---|:---|
 | `src/qwenputer_handover/problems/` | Problem record, `synth` generator, set loaders (upstream's for evaluation) |
-| `src/qwenputer_handover/rollout/` | Prompt variants, the per-rollout `Forcer`, in-graph `Sampling`, the `BatchDecoder` driver, rollout records |
+| `src/qwenputer_handover/rollout/` | Prompt variants, the per-rollout `Forcer` and `RepeatCut`, in-graph `Sampling`, the `BatchDecoder` driver, rollout records |
 | `src/qwenputer_handover/curation/` | Metrics and rejection sampling |
 | `src/qwenputer_handover/training/` | SFT masking, the LoRA loop, the merge-ready export |
 | `firmware/` | Upstream's `calc-bridge.elf` (Qwenputer `bec1a0c`, MIT; `LICENSE.qwenputer`) |
