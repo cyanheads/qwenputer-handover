@@ -71,7 +71,7 @@ def _train(a: argparse.Namespace) -> None:
         batch_tokens=a.batch_tokens,
         seed=a.seed,
     )
-    train(resolve_model(a.model), list(read(a.sft)), a.variant, a.out, cfg)
+    train(resolve_model(a.model), list(read(a.sft)), parse_variants(a.variants), a.out, cfg)
 
 
 def _export(a: argparse.Namespace) -> None:
@@ -129,10 +129,9 @@ def main() -> None:
     t.add_argument("--model", default=DEFAULT_MODEL)
     t.add_argument("--sft", type=Path, required=True)
     t.add_argument(
-        "--variant",
+        "--variants",
         default="bare",
-        choices=VARIANTS,
-        help="the prompt the generations are trained under",
+        help="comma-separated prompts each generation is trained under (once per prompt)",
     )
     t.add_argument("--out", type=Path, required=True, help="adapter directory (must not exist)")
     t.add_argument("--rank", type=int, default=16)

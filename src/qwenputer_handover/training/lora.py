@@ -57,11 +57,14 @@ class TrainConfig:
 
 
 def examples(
-    tok: PreTrainedTokenizerBase, rollouts: list[Rollout], variant: Variant, max_len: int
+    tok: PreTrainedTokenizerBase, rollouts: list[Rollout], variants: list[Variant], max_len: int
 ) -> tuple[list[Example], int]:
-    """Each rollout's generation under a ``variant`` prompt; also the count dropped as too long."""
+    """Each rollout's generation under each of the ``variants`` prompts, whatever prompt it was
+    sampled under; also the count dropped as too long."""
     built = [
-        build_example(prompt_ids(tok, r.question, variant), r.gen_ids, r.forced) for r in rollouts
+        build_example(prompt_ids(tok, r.question, v), r.gen_ids, r.forced)
+        for r in rollouts
+        for v in variants
     ]
     kept = [e for e in built if len(e.input_ids) <= max_len]
     return kept, len(built) - len(kept)
@@ -103,11 +106,15 @@ def micro_batches(step: list[int], lengths: list[int], batch_tokens: int) -> lis
 
 
 def train(
-    model_dir: Path, rollouts: list[Rollout], variant: Variant, out_dir: Path, cfg: TrainConfig
+    model_dir: Path,
+    rollouts: list[Rollout],
+    variants: list[Variant],
+    out_dir: Path,
+    cfg: TrainConfig,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=False)
     tok = AutoTokenizer.from_pretrained(model_dir)
-    data, dropped = examples(tok, rollouts, variant, cfg.max_len)
+    data, dropped = examples(tok, rollouts, variants, cfg.max_len)
     if not data:
         raise ValueError("no training examples fit max_len")
     lengths = [len(e.input_ids) for e in data]
@@ -134,7 +141,7 @@ def train(
             {
                 **asdict(cfg),
                 "model": str(model_dir),
-                "variant": variant,
+                "variants": variants,
                 "examples": len(data),
                 "dropped_too_long": dropped,
                 "labeled_tokens": sum(e.n_labeled for e in data),
