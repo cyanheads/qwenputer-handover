@@ -1,0 +1,87 @@
+# qwenputer-handover — rollouts, rejection-sampled SFT and a merge-ready LoRA export that teach
+# Qwen3.5-4B to hand its arithmetic to Qwenputer's in-weights RISC-V calculator. Managed with uv.
+
+[project]
+name = "qwenputer-handover"
+version = "0.1.0"
+description = "Fine-tunes Qwen3.5-4B to hand its arithmetic to Qwenputer's in-weights RISC-V calculator"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Casey Hand", email = "casey@caseyjhand.com" }]
+license = "Apache-2.0"
+keywords = [
+    "qwen3.5",
+    "lora",
+    "tool-use",
+    "rejection-sampling",
+    "in-weights-computation",
+    "risc-v",
+    "arithmetic",
+]
+dependencies = [
+    # Qwenputer's RISC-V variant: the reference machine, the calc firmware's bridge, the merge
+    # and the eval CLIs. Pinned to the commit this code was written against.
+    "chipformer[hf]",
+    "datasets>=4.0",
+    "huggingface-hub>=1.0",
+    "peft>=0.18",
+    "safetensors>=0.8",
+    "torch>=2.14.1",
+    "transformers>=5.19.0",
+]
+
+[project.urls]
+Repository = "https://github.com/cyanheads/qwenputer-handover"
+Upstream = "https://github.com/divagr18/qwenputer"
+
+[project.scripts]
+handover = "qwenputer_handover.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.uv.sources]
+chipformer = { git = "https://github.com/divagr18/qwenputer", subdirectory = "experimental/riscv", rev = "bec1a0c9654ac8151b6f36ed0154a19c53141384" }
+# Linux takes PyTorch's CUDA 13.0 build: PyPI's default Linux wheel (2.15.0+cu132) segfaults
+# in torch.cuda.is_available() under a WSL2 driver (610.47). macOS stays on PyPI.
+torch = { index = "pytorch-cu130", marker = "sys_platform == 'linux'" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qwenputer_handover"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+files = ["src", "tests"]
+python_version = "3.12"
+strict = true
+
+# chipformer, datasets and peft ship no type information; their call sites are typed here.
+[[tool.mypy.overrides]]
+module = ["chipformer.*", "datasets.*", "peft.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

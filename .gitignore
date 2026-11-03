@@ -1,0 +1,15 @@
+# dependencies and tool caches
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# run outputs: rollouts, SFT sets, adapters, exported and merged checkpoints
+runs/
+dist/
+
+# secrets and OS cruft
+.env
+.DS_Store
